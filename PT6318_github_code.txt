@@ -1,0 +1,407 @@
+/****************************************************/
+/* This is only one example of code structure       */
+/* OFFCOURSE this code can be optimized, but        */
+/* the idea is let it so simple to be easy catch    */
+/* where we can do changes and look to the results  */
+/****************************************************/
+//set your clock speed
+#define F_CPU 16000000UL
+//these are the include files. They are outside the project folder
+//#include <avr/io.h>
+//#include <iom1284p.h>
+#include <util/delay.h>
+//#include <avr/interrupt.h>
+
+#define VFD_dataIn 7// If 0 write LCD, if 1 read of LCD
+#define VFD_clk 8 // if 0 is a command, if 1 is a data0
+#define VFD_stb 9 // Must be pulsed to LCD fetch data of bus
+#define VFD_dataOut 10//
+#define AdjustPins    PIND // before is C, but I'm use port C to VFC Controle signals
+
+byte myByte= 0x01;   // this variable is only related with swapLed1.
+unsigned char secs;
+unsigned char number;
+
+unsigned int segments[] ={
+  //This not respect the normal table for 7segm like "abcdefgh"  // 
+   0b10011100,   0b00000011,  0b00000000, //0  // 
+   0b00010000,   0b00000001,  0b00000000, //1  // 
+   0b10001100,   0b01100001,  0b00000000, //2  // 
+   0b10010100,   0b01100001,  0b00000000, //3  // 
+   0b00010000,   0b01100011,  0b00000000, //4  // 
+   0b10010100,   0b01100010,  0b00000000, //5  // 
+   0b10011100,   0b01100010,  0b00000000, //6  // 
+   0b10010000,   0b00000001,  0b00000000, //7  // 
+   0b10011100,   0b01100011,  0b00000000, //8  // 
+   0b10010000,   0b01100011,  0b00000000, //9  // 
+   0b00000000,   0b00000000,  0b00000000  //10 // empty display
+  };
+unsigned int segmAlpha[] ={
+  //This not respect the normal table for 7segm like "abcdefgh"  // 
+   0b00011000,   0b01100011,  0b00000000, //H  // 
+   0b10100100,   0b00001000,  0b00000000, //I  // 
+   0b00000000,   0b00000000,  0b00000000, //spc// 
+   0b10001000,   0b01100010,  0b00000000, //F  // 
+   0b10011100,   0b00000011,  0b00000000, //O  // 
+   0b00001100,   0b00000010,  0b00000000, //L  // 
+   0b00001000,   0b10110010,  0b00000000, //K  // 
+   0b10010100,   0b01100010,  0b00000000, //S  // 
+   0b00000000,   0b00000000,  0b00000000, //   // 
+   0b00000000,   0b00000000,  0b00000000, //   // 
+   0b00000000,   0b00000000,  0b00000000  //   // empty display
+  };
+/************************** Initialize of driver PT6318***************************************/
+void pt6318_init(void){
+  delayMicroseconds(250); //power_up delay
+  // Note: Allways the first byte in the input data after the STB go to LOW is interpret as command!!!
+
+  // Configure VFD display (grids)
+  cmd_with_stb(0b00001001);//  (0b01000000)    cmd1 10 grids 18 segm in 6318 // (0b00001001) ten digits!
+  delayMicroseconds(1);
+  // turn vfd on, stop key scannig
+   cmd_with_stb(0b10000000);//(BIN(01100110)); 
+  delayMicroseconds(1);
+  // Write to memory display, increment address, normal operation
+  cmd_with_stb(0b01000000);//(BIN(01000000));
+  delayMicroseconds(1);
+  // Address 00H - 15H ( total of 11*2Bytes=176 Bits)
+  cmd_with_stb(0b11000000);//(BIN(01100110)); 
+  delayMicroseconds(1);
+  // set DIMM/PWM to value
+  cmd_with_stb((0b10001000) | 7);//0 min - 7 max  )(0b01010000)
+  delayMicroseconds(1);
+}
+/********************** Send a command with the strobe/chip select only to 4 bits*******************************************/
+void cmd_4bitsWithout_stb(unsigned char a){
+  // send without stb
+  unsigned char transmit = 3; //define our transmit pin
+  unsigned char data = 170; //value to transmit, binary 10101010
+  unsigned char mask = 1; //our bitmask
+  
+  data=a;
+  //This don't send the strobe signal, to be used in burst data send
+   for (mask = 00000001; mask>0; mask <<= 1) { //iterate through bit mask
+     digitalWrite(VFD_clk, LOW);
+     if (data & mask){ // if bitwise AND resolves to true
+        digitalWrite(VFD_dataIn, HIGH);
+     }
+     else{ //if bitwise and resolves to false
+       digitalWrite(VFD_dataIn, LOW);
+     }
+    delayMicroseconds(5);
+    digitalWrite(VFD_clk, HIGH);
+    delayMicroseconds(5);
+   }
+   //digitalWrite(VFD_clk, LOW);
+}
+/*********************** Send command without strobe/chip select******************************************/
+void cmd_without_stb(unsigned char a){
+  // send without stb
+  unsigned char transmit = 7; //define our transmit pin
+  unsigned char data = 170; //value to transmit, binary 10101010
+  unsigned char mask = 1; //our bitmask
+  
+  data=a;
+  //This don't send the strobe signal, to be used in burst data send
+   for (mask = 00000001; mask>0; mask <<= 1) { //iterate through bit mask
+     digitalWrite(VFD_clk, LOW);
+     if (data & mask){ // if bitwise AND resolves to true
+        digitalWrite(VFD_dataIn, HIGH);
+     }
+     else{ //if bitwise and resolves to false
+       digitalWrite(VFD_dataIn, LOW);
+     }
+    delayMicroseconds(5);
+    digitalWrite(VFD_clk, HIGH);
+    delayMicroseconds(5);
+   }
+   //digitalWrite(VFD_clk, LOW);
+}
+/************************ Send a command with the strobe/chip select only to 4 bits *****************************/
+void cmd_4bitsWith_stb(unsigned char a){
+  // send with stb
+  unsigned char transmit = 3; //define our transmit pin
+  unsigned char data = 170; //value to transmit, binary 10101010
+  unsigned char mask = 1; //our bitmask
+  
+  data=a;
+  
+  //This send the strobe signal
+  //Note: The first byte input at in after the STB go LOW is interpreted as a command!!!
+  digitalWrite(VFD_stb, LOW);
+  delayMicroseconds(1);
+   for (mask = 00000001; mask>0; mask <<= 1) { //iterate through bit mask
+     digitalWrite(VFD_clk, LOW);
+     delayMicroseconds(1);
+     if (data & mask){ // if bitwise AND resolves to true
+        digitalWrite(VFD_dataIn, HIGH);
+     }
+     else{ //if bitwise and resolves to false
+       digitalWrite(VFD_dataIn, LOW);
+     }
+    digitalWrite(VFD_clk, HIGH);
+    delayMicroseconds(1);
+   }
+   digitalWrite(VFD_stb, HIGH);
+   delayMicroseconds(1);
+}
+/********************** Send a command with the strobe/chip select *******************************************/
+void cmd_with_stb(unsigned char a){
+  // send with stb
+  unsigned char data = 0x00; //value to transmit, binary 10101010
+  unsigned char mask = 1; //our bitmask
+  
+  data=a;
+  
+  //This send the strobe signal
+  //Note: The first byte input at in after the STB go LOW is interpreted as a command!!!
+  digitalWrite(VFD_stb, LOW);
+  delayMicroseconds(1);
+   for (mask = 00000001; mask>0; mask <<= 1) { //iterate through bit mask
+     digitalWrite(VFD_clk, LOW);
+     delayMicroseconds(1);
+     if (data & mask){ // if bitwise AND resolves to true
+        digitalWrite(VFD_dataIn, HIGH);
+     }
+     else{ //if bitwise and resolves to false
+       digitalWrite(VFD_dataIn, LOW);
+     }
+    digitalWrite(VFD_clk, HIGH);
+    delayMicroseconds(1);
+   }
+   digitalWrite(VFD_stb, HIGH);
+   delayMicroseconds(1);
+}
+/*********************** Run a test to VFD, let it all bright******************************************/
+void test_VFD(void){
+  clear_VFD();   
+      digitalWrite(VFD_stb, LOW);
+      delayMicroseconds(1);
+      cmd_with_stb(0b00001001); // cmd 1 // 5 Grids & 16 Segments
+      cmd_with_stb(0b01000000); // cmd 2 //Write VFD, Normal operation; Set pulse as 1/16, Auto increment
+      cmd_with_stb(0b10001000 | 0x07); // cmd 2 //set on, dimmer to max
+        digitalWrite(VFD_stb, LOW);
+        delayMicroseconds(1);
+        cmd_without_stb((0b11000000)); //cmd 3 wich define the start address (00H to 15H)
+        // Only here must change the bit to test, first 2 bytes and 1/2 byte of third.
+         for (int i = 0; i < 8 ; i++){ // test base to 16 segm and 5 grids
+          // Zone of test, if write 1 on any position of 3 bytes below position, will bright segment corresponding it.
+         cmd_without_stb(0b00000000); // Data to fill table 5*16 = 80 bits
+         cmd_without_stb(0b00000000); // Data to fill table 5*16 = 80 bits
+         cmd_4bitsWithout_stb(0b00000000); // Data to fill table 5*16 = 80 bits
+         }
+      //cmd_without_stb(0b00000001); // cmd1 Here I define the 5 grids and 16 Segments
+      //cmd_with_stb((0b10001000) | 7); //cmd 4
+      digitalWrite(VFD_stb, HIGH);
+      delay(1);
+      delay(3000);  
+}
+/*********************** Clear of VFD display ******************************************/
+void clear_VFD(void){
+  /*
+  Here I clean all registers 
+  Could be done only on the number of grid
+  to be more fast. The 12 * 3 bytes = 36 registers
+  */
+      for (int n=0; n < 30; n++){ //  // Note: The char is constituted by 2&1/2 bytes, by this reason count 3 bytes by char!!!
+        cmd_with_stb(0b00001001); //       cmd 1 // 10 Grids & 18 Segments
+        cmd_with_stb(0b01000000); //       cmd 2 //Normal operation; Set pulse as 1/16
+        digitalWrite(VFD_stb, LOW);
+        delayMicroseconds(1);
+            cmd_without_stb((0b11000000) | n); // cmd 3 //wich define the start address (00H to 15H)
+            cmd_without_stb(0b00000000); // Data to fill table of 5 grids * 16 segm = 80 bits on the table
+            cmd_without_stb(0b00000000); // Data to fill table of 5 grids * 16 segm = 80 bits on the table
+            cmd_4bitsWithout_stb(0b00000000); // only half byte of third byte.
+            //
+            //cmd_with_stb((0b10001000) | 7); //cmd 4
+            digitalWrite(VFD_stb, HIGH);
+            delayMicroseconds(1);
+     }
+}
+/********************** To adapt the 7 seg if use VFD with different 7 seg digits *****************************/
+void DigitTo7SegEncoder( unsigned char digit){
+  switch(digit){
+    case 0:   number=0;     break;  // if remove the LongX, need put here the segments[x]
+    case 1:   number=1;     break;
+    case 2:   number=2;     break;
+    case 3:   number=3;     break;
+    case 4:   number=4;     break;
+    case 5:   number=5;     break;
+    case 6:   number=6;     break;
+    case 7:   number=7;     break;
+    case 8:   number=8;     break;
+    case 9:   number=9;     break;
+  }
+} 
+void send14segmNum(unsigned int num){
+      cmd_with_stb(0b00001001); // cmd 1 // 10 Grids & 18 Segments
+      cmd_with_stb(0b01000000); // cmd 2 //Normal operation; Set pulse as 1/16
+        //
+        digitalWrite(VFD_stb, LOW);
+        delayMicroseconds(1);
+        cmd_without_stb((0b11000000) | (num)); //cmd 3 wich define the start address (00H)
+        //
+          cmd_without_stb(segments[num]); // 
+          cmd_without_stb(segments[num+1]); // minuts units
+          cmd_4bitsWithout_stb(segments[num+2]); // minuts dozens
+      digitalWrite(VFD_stb, HIGH);
+      cmd_with_stb((0b10001000) | 7); //cmd 4
+      delay(1);
+      delay(100);  
+}
+void send14segmAlpha(unsigned int num){
+      cmd_with_stb(0b00001001); // cmd 1 // 10 Grids & 18 Segments
+      cmd_with_stb(0b01000000); // cmd 2 //Normal operation; Set pulse as 1/16
+        //
+        digitalWrite(VFD_stb, LOW);
+        delayMicroseconds(1);
+        cmd_without_stb((0b11000000) | (num)); //cmd 3 wich define the start address (00H)
+        //
+          cmd_without_stb(segmAlpha[num]); // 
+          cmd_without_stb(segmAlpha[num+1]); // minuts units
+          cmd_4bitsWithout_stb(segmAlpha[num+2]); // minuts dozens
+      digitalWrite(VFD_stb, HIGH);
+      cmd_with_stb((0b10001000) | 7); //cmd 4
+      delay(1);
+      delay(100);  
+}
+/************************* Swap the led Function ***************************************/
+void swapLeds(){
+    digitalWrite(VFD_stb, LOW);
+    delayMicroseconds(20);
+    cmd_without_stb(0b01000001); // This is to define write to LED's
+    delayMicroseconds(20);
+    myByte ^=(0b00011001);  //Here invert bit of led 0,3 & 4, repeat this function if you want use other of 5 remaining leds. //3 led meio
+    cmd_without_stb(myByte);
+    delayMicroseconds(20);
+    digitalWrite(VFD_stb, HIGH);
+    delayMicroseconds(20);
+}
+void onOff(bool on){
+    digitalWrite(VFD_stb, LOW);
+    delayMicroseconds(20);
+    if (!on){
+    cmd_without_stb(0b10000000); // This swithc Off display!!!
+    delayMicroseconds(20);
+    }else{
+      cmd_without_stb(0b10001111); // This swithc On the VFD and define the Dimming Quantity Settings 
+    delayMicroseconds(20);
+    }
+    digitalWrite(VFD_stb, HIGH);
+    delayMicroseconds(20);
+}
+void dimming(unsigned int dimmer){
+  digitalWrite(VFD_stb, LOW);
+    delayMicroseconds(20);
+    cmd_without_stb((0b10001000) | dimmer); // This swithc On the VFD and define the Dimming Quantity Settings 
+    delayMicroseconds(20);
+    digitalWrite(VFD_stb, HIGH);
+    delayMicroseconds(20);
+}
+/************************ Setup Zone******************************************/
+void setup() {
+// This setup is defined to work with interrupts in case evoluate to a clock!!!
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(VFD_dataIn, OUTPUT);
+  pinMode(VFD_clk, OUTPUT);
+  pinMode(VFD_stb, OUTPUT);
+  pinMode(VFD_dataOut, INPUT_PULLUP);
+  Serial.begin(9600);
+ 
+  /*CS12  CS11 CS10 DESCRIPTION
+  0        0     0  Timer/Counter1 Disabled 
+  0        0     1  No Prescaling
+  0        1     0  Clock / 8
+  0        1     1  Clock / 64
+  1        0     0  Clock / 256
+  1        0     1  Clock / 1024
+  1        1     0  External clock source on T1 pin, Clock on Falling edge
+  1        1     1  External clock source on T1 pin, Clock on rising edge
+ */
+  // initialize timer1 
+  cli();           // disable all interrupts
+  // initialize timer1 
+  //noInterrupts();           // disable all interrupts
+  TCCR1A = 0;
+  TCCR1B = 0;// This initialisations is very important, to have sure the trigger take place!!!
+  TCNT1  = 0;
+  // Use 62499 to generate a cycle of 1 sex 2 X 0.5 Secs (16MHz / (2*256*(1+62449) = 0.5
+  //ATT: Depending of the arduino you use, maybe is necessary redo this calcul. Check your Xtall
+  OCR1A = 62499;            // compare match register 16MHz/256/2Hz
+  TCCR1B |= (1 << WGM12);   // CTC mode
+  TCCR1B |= ((1 << CS12) | (0 << CS11) | (0 << CS10));    // 256 prescaler 
+  TIMSK1 |= (1 << OCIE1A);  // enable timer compare interrupt
+  
+// Note: this counts is done to a Arduino 1 with Atmega 328... Is possible you need adjust
+// a little the value 62499 upper or lower if the clock have a delay or advnce on hours.
+   
+//  a=0x33;
+//  b=0x01;
+
+CLKPR=(0x80);
+//Set PORT
+DDRD = 0xFF;  // IMPORTANT: from pin 0 to 7 is port D, from pin 8 to 13 is port B
+PORTD=0x00;
+DDRB =0xFF;
+PORTB =0x00;
+
+pt6318_init();
+
+test_VFD();
+
+clear_VFD();
+
+//only here I active the enable of interrupts to allow run the test of VFD
+//interrupts();             // enable all interrupts
+sei();
+}
+/********************** Loop Zone *********************************/
+void loop() {
+  bool VFDon = true;
+  unsigned int arrayPosition=0;
+    clear_VFD();
+    swapLeds();
+    delay(500);
+  
+       for (int n=0; n < 11; n++){  // Write number by forward sequency
+          arrayPosition=n*3;
+          send14segmNum(arrayPosition);
+          delay(100);
+          }
+   clear_VFD();
+   
+        for (int n=11; n >= 0; n--){ // Write the number's by backward sequency
+          arrayPosition=n*3;
+          send14segmNum(arrayPosition);
+          delay(100);
+          }
+          
+        for (int n=7; n >= 0; n--){  // Adjusting the bright of VFD 
+         dimming(n);
+         delay(750);
+        }
+        
+   clear_VFD();
+   
+        for (int n=0; n < 11; n++){  // Write message "HI FOLKS"
+         arrayPosition=n*3;
+         send14segmAlpha(arrayPosition);
+         delay(200);
+        }
+        
+        for (int i=0; i<6; i++){    // Switch on/off of VFD
+          onOff(VFDon);
+          delay(500);
+          VFDon=!VFDon;
+          delay(500);
+        }
+}
+/******************** Interrupt Zone *****************************/
+ISR(TIMER1_COMPA_vect)   { 
+//This is the interrupt request
+//https://sites.google.com/site/qeewiki/books/avr-guide/timers-on-the-atmega328
+//
+      secs++;
+      Serial.println(secs);
+//
+} 
